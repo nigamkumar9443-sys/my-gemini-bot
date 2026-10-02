@@ -20,67 +20,72 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Google ka latest supported model
-CHAT_MODEL = "gemini-3.8-flash"
+# Primary & Fallback Models taaki 503 error kabhi na ruke
+PRIMARY_MODEL = "gemini-3.8-flash"
+FALLBACK_MODELS = ["gemini-2.5-flash", "gemini-2.0-flash"]
 
-chat_sessions = {}
+chat_histories = {}
 
-def get_or_create_chat(user_id: int):
-    if user_id not in chat_sessions:
-        chat_sessions[user_id] = client.chats.create(
-            model=CHAT_MODEL,
-            config=types.GenerateContentConfig(
-                system_instruction="Aap ek helpful, smart AI assistant hain. Friendly andaaz me Roman Hindi/Hinglish me jawab dein."
-            ),
-        )
-    return chat_sessions[user_id]
+def call_gemini_with_fallback(contents, system_instruction=None):
+    models_to_try = [PRIMARY_MODEL] + FALLBACK_MODELS
+    last_error = None
+
+    for model_name in models_to_try:
+        try:
+            config = types.GenerateContentConfig(
+                system_instruction=system_instruction or "Aap ek helpful, smart AI assistant hain. Roman Hindi/Hinglish me friendly jawab dein."
+            )
+            response = client.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
+            )
+            return response.text
+        except Exception as e:
+            last_error = e
+            continue
+
+    raise last_error
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    chat_sessions[user_id] = client.chats.create(
-        model=CHAT_MODEL,
-        config=types.GenerateContentConfig(
-            system_instruction="Aap ek helpful, smart AI assistant hain. Friendly andaaz me Roman Hindi/Hinglish me jawab dein."
-        ),
-    )
+    chat_histories[user_id] = []
     msg = (
         "Namaste! Main **Gemini AI Bot** hoon.\n\n"
-        "• Sawal-Jawab aur Chat karein\n"
-        "• Photos & Docs bhejein\n"
-        "• Voice Notes bhej kar baat karein\n"
+        "• Sawal-Jawab aur Chat\n"
+        "• Photos & Docs Analysis\n"
+        "• Voice Notes\n"
         "• AI Image banana: `/image <prompt>`\n\n"
-        "Menu commands ke liye slash `/` dabayein ya `/help` karein."
+        "Reset chat ke liye: `/clear`"
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
 async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    if user_id in chat_sessions:
-        del chat_sessions[user_id]
+    chat_histories[user_id] = []
     await update.message.reply_text("Chat memory reset kar di gayi hai!")
 
 async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
-        "**Bot Features:**\n\n"
-        "1. `/image <prompt>` - Nayi image generate karein\n"
-        "2. `/clear` ya `/reset` - Memory reset karein\n"
-        "3. `/model` - Active model status\n"
-        "4. `/video` - Video tool status\n"
-        "5. Direct Photos/PDFs bhejein summary ke liye"
+        "**Available Commands:**\n\n"
+        "• `/image <prompt>` - AI photo generate karein\n"
+        "• `/clear` ya `/reset` - Context clear karein\n"
+        "• `/model` - Check status\n"
+        "• Direct text/photo/voice bhejein"
     )
     await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
 
 async def model_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(f"Currently active AI model: `{CHAT_MODEL}`", parse_mode=ParseMode.MARKDOWN)
+    await update.message.reply_text(f"Active Model Pool: `{PRIMARY_MODEL}` with auto-failover.", parse_mode=ParseMode.MARKDOWN)
 
 async def video_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("Video generation feature testing phase mein hai aur jald live hoga!")
+    await update.message.reply_text("Video generation feature testing phase mein hai.")
 
-# Free Pollinations AI Image Generator
+# 100% Free image generator
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args)
     if not prompt:
-        await update.message.reply_text("Kripya description dein: `/image a cute dog in space`")
+        await update.message.reply_text("Kripya description dein: `/image a futuristic city`")
         return
 
     await update.message.chat.send_action(ChatAction.UPLOAD_PHOTO)
@@ -93,18 +98,33 @@ async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    chat = get_or_create_chat(user_id)
+    user_msg = update.message.text
+
+    if user_id not in chat_histories:
+        chat_histories[user_id] = []
+
+    chat_histories[user_id].append({"role": "user", "parts": [user_msg]})
     await update.message.chat.send_action(ChatAction.TYPING)
+
     try:
-        res = chat.send_message(update.message.text)
-        await update.message.reply_text(res.text)
+        # Convert history format for Gemini
+        formatted_contents = []
+        for msg in chat_histories[user_id]:
+            formatted_contents.append(
+                types.Content(
+                    role=msg["role"],
+                    parts=[types.Part.from_text(text=p) for p in msg["parts"]],
+                )
+            )
+
+        reply_text = call_gemini_with_fallback(formatted_contents)
+        chat_histories[user_id].append({"role": "model", "parts": [reply_text]})
+        await update.message.reply_text(reply_text)
     except Exception as e:
-        await update.message.reply_text(f"Error: {str(e)}")
+        await update.message.reply_text(f"Server busy hai, kripya 5 second baad dubara puchein. ({str(e)})")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = update.effective_user.id
-    chat = get_or_create_chat(user_id)
-    caption = update.message.caption or "Explain this image."
+    caption = update.message.caption or "Describe this image."
     await update.message.chat.send_action(ChatAction.TYPING)
     try:
         photo = await update.message.photo[-1].get_file()
@@ -112,8 +132,9 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await photo.download_to_memory(stream)
         stream.seek(0)
         img = Image.open(stream)
-        res = chat.send_message([img, caption])
-        await update.message.reply_text(res.text)
+
+        reply_text = call_gemini_with_fallback([img, caption])
+        await update.message.reply_text(reply_text)
     except Exception as e:
         await update.message.reply_text(f"Error: {str(e)}")
 
@@ -125,22 +146,22 @@ async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         doc_file = await doc.get_file()
         file_bytes = await doc_file.download_as_bytearray()
         part = types.Part.from_bytes(data=bytes(file_bytes), mime_type=doc.mime_type or "application/pdf")
-        res = client.models.generate_content(model=CHAT_MODEL, contents=[part, caption])
-        await update.message.reply_text(res.text)
+
+        reply_text = call_gemini_with_fallback([part, caption])
+        await update.message.reply_text(reply_text)
     except Exception as e:
         await update.message.reply_text(f"Error: {str(e)}")
 
 async def handle_voice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     voice = update.message.voice or update.message.audio
-    user_id = update.effective_user.id
-    chat = get_or_create_chat(user_id)
     await update.message.chat.send_action(ChatAction.RECORD_VOICE)
     try:
         voice_file = await voice.get_file()
         audio_bytes = await voice_file.download_as_bytearray()
         part = types.Part.from_bytes(data=bytes(audio_bytes), mime_type="audio/ogg")
-        res = chat.send_message([part, "Audio ko sun kar jawab dein."])
-        await update.message.reply_text(res.text)
+
+        reply_text = call_gemini_with_fallback([part, "Audio ko sun kar Roman Hindi me jawab dein."])
+        await update.message.reply_text(reply_text)
     except Exception as e:
         await update.message.reply_text(f"Error: {str(e)}")
 
