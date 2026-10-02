@@ -1,5 +1,5 @@
 import os
-import time
+import urllib.parse
 from io import BytesIO
 from PIL import Image
 
@@ -20,9 +20,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Latest supported models
-CHAT_MODEL = "gemini-3.8-flash"
-IMAGE_MODEL = "gemini-2.5-flash-image"
+# Free Tier ke liye sabse stable model
+CHAT_MODEL = "gemini-2.0-flash"
 
 chat_sessions = {}
 
@@ -31,8 +30,7 @@ def get_or_create_chat(user_id: int):
         chat_sessions[user_id] = client.chats.create(
             model=CHAT_MODEL,
             config=types.GenerateContentConfig(
-                system_instruction="Aap ek helpful, smart AI assistant hain jaise official Google Gemini. Friendly andaaz me jawab dein.",
-                tools=[{"google_search": {}}],
+                system_instruction="Aap ek helpful, smart AI assistant hain. Friendly andaaz me Roman Hindi/Hinglish me jawab dein."
             ),
         )
     return chat_sessions[user_id]
@@ -42,17 +40,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_sessions[user_id] = client.chats.create(
         model=CHAT_MODEL,
         config=types.GenerateContentConfig(
-            system_instruction="Aap ek helpful, smart AI assistant hain jaise official Google Gemini.",
-            tools=[{"google_search": {}}],
+            system_instruction="Aap ek helpful, smart AI assistant hain. Friendly andaaz me Roman Hindi/Hinglish me jawab dein."
         ),
     )
     msg = (
         "Namaste! Main **Gemini AI Bot** hoon.\n\n"
         "• Sawal-Jawab aur Chat\n"
         "• Photos & Docs Analysis\n"
-        "• Voice Messages\n"
-        "• Image banana: `/image <prompt>`\n\n"
-        "Reset ke liye: `/clear`"
+        "• Voice Notes\n"
+        "• Unlimited Free Image banana: `/image <prompt>`\n\n"
+        "Reset chat ke liye: `/clear`"
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
@@ -62,38 +59,20 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del chat_sessions[user_id]
     await update.message.reply_text("Chat memory reset kar di gayi hai!")
 
+# 100% Free Image Generator (No Quota Limit)
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args)
     if not prompt:
-        await update.message.reply_text("Kripya description dein: `/image a cute dog with sunglasses`")
+        await update.message.reply_text("Kripya description dein: `/image a cute dog in space`")
         return
 
-    status_msg = await update.message.reply_text("Image banayi ja rahi hai...")
     await update.message.chat.send_action(ChatAction.UPLOAD_PHOTO)
-
     try:
-        response = client.models.generate_content(
-            model=IMAGE_MODEL,
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_modalities=["IMAGE"]
-            )
-        )
-        
-        sent = False
-        if response.candidates and response.candidates[0].content.parts:
-            for part in response.candidates[0].content.parts:
-                if part.inline_data:
-                    stream = BytesIO(part.inline_data.data)
-                    stream.seek(0)
-                    await update.message.reply_photo(photo=stream, caption=f"Prompt: {prompt}")
-                    sent = True
-        
-        if not sent:
-            await update.message.reply_text("Image generate nahi ho saki, kripya alag prompt try karein.")
-        await status_msg.delete()
+        encoded_prompt = urllib.parse.quote(prompt)
+        image_url = f"https://image.pollinations.ai/prompt/{encoded_prompt}?width=1024&height=1024&nologo=true"
+        await update.message.reply_photo(photo=image_url, caption=f"Prompt: {prompt}")
     except Exception as e:
-        await status_msg.edit_text(f"Image error: {str(e)}")
+        await update.message.reply_text(f"Image error: {str(e)}")
 
 async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
