@@ -20,8 +20,8 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 
-# Free Tier ke liye sabse stable model
-CHAT_MODEL = "gemini-2.0-flash"
+# Google ka latest supported model
+CHAT_MODEL = "gemini-3.8-flash"
 
 chat_sessions = {}
 
@@ -45,11 +45,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     msg = (
         "Namaste! Main **Gemini AI Bot** hoon.\n\n"
-        "• Sawal-Jawab aur Chat\n"
-        "• Photos & Docs Analysis\n"
-        "• Voice Notes\n"
-        "• Unlimited Free Image banana: `/image <prompt>`\n\n"
-        "Reset chat ke liye: `/clear`"
+        "• Sawal-Jawab aur Chat karein\n"
+        "• Photos & Docs bhejein\n"
+        "• Voice Notes bhej kar baat karein\n"
+        "• AI Image banana: `/image <prompt>`\n\n"
+        "Menu commands ke liye slash `/` dabayein ya `/help` karein."
     )
     await update.message.reply_text(msg, parse_mode=ParseMode.MARKDOWN)
 
@@ -59,7 +59,24 @@ async def clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
         del chat_sessions[user_id]
     await update.message.reply_text("Chat memory reset kar di gayi hai!")
 
-# 100% Free Image Generator (No Quota Limit)
+async def help_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    help_text = (
+        "**Bot Features:**\n\n"
+        "1. `/image <prompt>` - Nayi image generate karein\n"
+        "2. `/clear` ya `/reset` - Memory reset karein\n"
+        "3. `/model` - Active model status\n"
+        "4. `/video` - Video tool status\n"
+        "5. Direct Photos/PDFs bhejein summary ke liye"
+    )
+    await update.message.reply_text(help_text, parse_mode=ParseMode.MARKDOWN)
+
+async def model_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(f"Currently active AI model: `{CHAT_MODEL}`", parse_mode=ParseMode.MARKDOWN)
+
+async def video_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text("Video generation feature testing phase mein hai aur jald live hoga!")
+
+# Free Pollinations AI Image Generator
 async def generate_image(update: Update, context: ContextTypes.DEFAULT_TYPE):
     prompt = " ".join(context.args)
     if not prompt:
@@ -131,6 +148,10 @@ if __name__ == "__main__":
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("clear", clear))
+    app.add_handler(CommandHandler("reset", clear))
+    app.add_handler(CommandHandler("help", help_cmd))
+    app.add_handler(CommandHandler("model", model_cmd))
+    app.add_handler(CommandHandler("video", video_cmd))
     app.add_handler(CommandHandler("image", generate_image))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
